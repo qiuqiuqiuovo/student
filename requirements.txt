@@ -1,0 +1,7 @@
+# 学生成绩管理系统 - Python 依赖（Python 3.10+，开发环境 3.13）
+fastapi>=0.115
+uvicorn[standard]>=0.30
+jinja2>=3.1
+pymysql>=1.1
+python-multipart>=0.0.9   # FastAPI 表单 POST 必需（最易漏装的依赖）
+itsdangerous>=2.2         # starlette SessionMiddleware 的签名 cookie 依赖

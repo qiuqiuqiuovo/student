@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}学生管理 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>学生管理</h1>
+    <p class="sub">共 {{ total }} 名学生 · 删除学生会级联删除其全部成绩（外键 ON DELETE CASCADE）</p>
+  </div>
+  <div class="form-row">
+    <form method="get" action="/students" class="form-row">
+      <input type="text" name="search" value="{{ search }}" placeholder="搜索学号 / 姓名 / 专业 / 班级">
+      <button type="submit" class="btn btn-ghost">搜索</button>
+      {% if search %}<a class="btn btn-ghost" href="/students">清除</a>{% endif %}
+    </form>
+    <button type="button" class="btn btn-primary" onclick="openStudentModal()">＋ 新增学生</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>学号</th><th>姓名</th><th>性别</th>
+          <th>出生日期</th><th>专业</th><th>班级</th><th>入学日期</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for s in items %}
+        <tr data-id="{{ s.student_id }}"
+            data-student-no="{{ s.student_no }}"
+            data-name="{{ s.name }}"
+            data-gender="{{ s.gender }}"
+            data-birth="{{ s.birth_date or '' }}"
+            data-major="{{ s.major or '' }}"
+            data-class="{{ s.class_name or '' }}"
+            data-enroll="{{ s.enrollment_date or '' }}">
+          <td>{{ s.student_id }}</td>
+          <td>{{ s.student_no }}</td>
+          <td>{{ s.name }}</td>
+          <td>{{ s.gender }}</td>
+          <td>{{ s.birth_date or '—' }}</td>
+          <td>{{ s.major or '—' }}</td>
+          <td>{{ s.class_name or '—' }}</td>
+          <td>{{ s.enrollment_date or '—' }}</td>
+          <td>
+            <div class="row-actions">
+              <button type="button" class="link-btn" onclick="openStudentModal(this.closest('tr'))">编辑</button>
+              <button type="button" class="link-btn danger"
+                      onclick="deleteStudent(this.closest('tr'))">删除</button>
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9" class="empty">暂无学生数据</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}<a href="?search={{ search | urlencode }}&page={{ page - 1 }}">上一页</a>{% endif %}
+    <span class="current">第 {{ page }} / {{ pages }} 页</span>
+    {% if page < pages %}<a href="?search={{ search | urlencode }}&page={{ page + 1 }}">下一页</a>{% endif %}
+    <span class="info">共 {{ total }} 条</span>
+  </div>
+  {% endif %}
+</div>
+
+{# ---------- 新增 / 编辑 Modal ---------- #}
+<div class="modal-mask" id="student-modal" style="display:none"
+     onclick="if (event.target === this) closeModal('student-modal')">
+  <div class="modal">
+    <h3 id="student-modal-title">新增学生</h3>
+    <form id="student-form" onsubmit="submitStudent(event)">
+      <input type="hidden" id="student-id">
+      <div class="form-field">
+        <label for="student-no">学号 *</label>
+        <input id="student-no" name="student_no" required maxlength="20">
+      </div>
+      <div class="form-field">
+        <label for="student-name">姓名 *</label>
+        <input id="student-name" name="name" required maxlength="50">
+      </div>
+      <div class="form-field">
+        <label for="student-gender">性别</label>
+        <select id="student-gender" name="gender">
+          <option value="男">男</option>
+          <option value="女">女</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="student-birth">出生日期</label>
+        <input id="student-birth" name="birth_date" type="date">
+      </div>
+      <div class="form-field">
+        <label for="student-major">专业</label>
+        <input id="student-major" name="major" maxlength="50">
+      </div>
+      <div class="form-field">
+        <label for="student-class">班级</label>
+        <input id="student-class" name="class_name" maxlength="50">
+      </div>
+      <div class="form-field">
+        <label for="student-enroll">入学日期</label>
+        <input id="student-enroll" name="enrollment_date" type="date">
+      </div>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('student-modal')">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openStudentModal(tr) {
+  const f = document.getElementById('student-form');
+  if (tr) {
+    document.getElementById('student-modal-title').textContent = '编辑学生';
+    document.getElementById('student-id').value = tr.dataset.id;
+    f.elements.student_no.value = tr.dataset.studentNo;
+    f.elements.name.value = tr.dataset.name;
+    f.elements.gender.value = tr.dataset.gender;
+    f.elements.birth_date.value = tr.dataset.birth;
+    f.elements.major.value = tr.dataset.major;
+    f.elements.class_name.value = tr.dataset.class;
+    f.elements.enrollment_date.value = tr.dataset.enroll;
+  } else {
+    document.getElementById('student-modal-title').textContent = '新增学生';
+    document.getElementById('student-id').value = '';
+    f.reset();
+  }
+  openModal('student-modal');
+}
+
+async function submitStudent(e) {
+  e.preventDefault();
+  const f = document.getElementById('student-form');
+  const id = document.getElementById('student-id').value;
+  const payload = {
+    student_no: f.elements.student_no.value.trim(),
+    name: f.elements.name.value.trim(),
+    gender: f.elements.gender.value,
+    birth_date: f.elements.birth_date.value || null,
+    major: f.elements.major.value.trim() || null,
+    class_name: f.elements.class_name.value.trim() || null,
+    enrollment_date: f.elements.enrollment_date.value || null,
+  };
+  try {
+    if (id) {
+      await fetchJSON(`/api/students/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      toast('学生信息已更新');
+    } else {
+      await fetchJSON('/api/students', { method: 'POST', body: JSON.stringify(payload) });
+      toast('学生已新增');
+    }
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteStudent(tr) {
+  if (!confirmDelete(`确定删除学生「${tr.dataset.name}」？\n其全部成绩记录将级联删除，且不可恢复。`)) return;
+  try {
+    await fetchJSON(`/api/students/${tr.dataset.id}`, { method: 'DELETE' });
+    toast('学生已删除');
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+</script>
+{% endblock %}

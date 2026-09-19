@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+{% block title %}统计报表 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>统计报表</h1>
+    <p class="sub">图表数据来自 <code>/api/stats/*</code> 接口，统计口径与 sql/03_queries.sql 一致，部分查询读取视图（v_student_overview）</p>
+  </div>
+</div>
+
+{% set ov = overview %}
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.student_count }}</div>
+    <div class="kpi-label">学生人数</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.grade_count }}</div>
+    <div class="kpi-label">成绩记录</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.overall_avg }}</div>
+    <div class="kpi-label">全库平均分</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.overall_pass_rate }}%</div>
+    <div class="kpi-label">总体及格率</div>
+    {% if ov.overall_pass_rate >= 80 %}
+    <span class="kpi-status good"><span class="dot good"></span>整体良好</span>
+    {% else %}
+    <span class="kpi-status bad"><span class="dot bad"></span>整体偏低</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="chart-grid">
+  <div class="card chart-card">
+    <h2>成绩分段分布</h2>
+    <div id="dist-chart" class="chart-box"></div>
+  </div>
+  <div class="card chart-card">
+    <h2>各课程平均分</h2>
+    <div id="course-avg-chart" class="chart-box"></div>
+  </div>
+  <div class="card chart-card">
+    <h2>各课程及格率</h2>
+    <div id="pass-rate-chart" class="chart-box"></div>
+  </div>
+  <div class="card chart-card">
+    <h2>班级 × 课程平均分对比</h2>
+    <div id="class-course-chart" class="chart-box"></div>
+  </div>
+  <div class="card chart-card">
+    <h2>各专业平均分</h2>
+    <div id="major-avg-chart" class="chart-box"></div>
+  </div>
+  <div class="card chart-card">
+    <h2>学生综合表现（课程门数 × 平均分）</h2>
+    <div id="scatter-chart" class="chart-box"></div>
+  </div>
+  <div class="card chart-card">
+    <h2>各课程第一名（RANK() OVER 窗口函数）</h2>
+    <div id="course-top-chart" class="chart-box"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>不及格名单（表格视图 · 无障碍兜底）</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>学号</th><th>姓名</th><th>班级</th><th>课程</th><th>分数</th></tr></thead>
+      <tbody id="fail-tbody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>学生综合明细（来自视图 v_student_overview）</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>学号</th><th>姓名</th><th>班级</th><th>专业</th><th>课程门数</th>
+            <th>平均分</th><th>最高分</th><th>最低分</th><th>及格门数</th><th>不及格门数</th></tr>
+      </thead>
+      <tbody id="student-tbody"><tr><td colspan="10" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/echarts.min.js"></script>
+<script>
+const charts = {};
+function initChart(id) {
+  charts[id] = echarts.init(document.getElementById(id));
+  return charts[id];
+}
+
+/* 专业 → 颜色固定映射（颜色跟随实体，与数据顺序无关） */
+const MAJOR_COLORS = {
+  '计算机科学与技术': PALETTE[0],
+  '软件工程': PALETTE[1],
+  '数据科学': PALETTE[2],
+};
+const majorColor = (m) => MAJOR_COLORS[m] || PALETTE[3];
+
+function renderDist(data) {
+  const distColors = [...SEQ_BLUE].reverse();  // 分数越高颜色越深
+  initChart('dist-chart').setOption({
+    ...baseChartOption(),
+    grid: { left: 8, right: 56, top: 12, bottom: 8, containLabel: true },
+    tooltip: { ...baseChartOption().tooltip, formatter: (p) => `${p.name}：<b>${p.value}</b> 人次` },
+    xAxis: { type: 'value', ...valAxisStyle(), minInterval: 1 },
+    yAxis: { type: 'category', inverse: true, data: data.map(d => d.seg), ...catAxisStyle() },
+    series: [{
+      type: 'bar',
+      data: data.map((d, i) => ({ value: d.cnt, itemStyle: { color: distColors[i], borderRadius: [0, 4, 4, 0] } })),
+      barWidth: 22,
+      barCategoryGap: '25%',
+      label: { show: true, position: 'right', color: INK.secondary, fontSize: 12, formatter: '{c}' },
+    }],
+  });
+}
+
+function renderCourseAvg(data) {
+  initChart('course-avg-chart').setOption({
+    ...baseChartOption(),
+    grid: { left: 8, right: 16, top: 30, bottom: 60, containLabel: true },
+    tooltip: { ...baseChartOption().tooltip, formatter: (p) => `${p.name}：<b>${p.value}</b> 分` },
+    xAxis: { type: 'category', data: data.map(d => d.name), ...catAxisStyle(),
+             axisLabel: { ...catAxisStyle().axisLabel, rotate: 30 } },
+    yAxis: { type: 'value', min: 0, max: 100, ...valAxisStyle() },
+    series: [{
+      name: '平均分',  // 单系列：无图例框，标题已说明
+      type: 'bar',
+      data: data.map(d => d.avg_score),
+      barWidth: 28,
+      itemStyle: { color: PALETTE[0], borderRadius: [4, 4, 0, 0] },
+      label: { show: true, position: 'top', color: INK.secondary, fontSize: 12, formatter: '{c}' },
+    }],
+  });
+}
+
+function renderPassRate(data) {
+  initChart('pass-rate-chart').setOption({
+    ...baseChartOption(),
+    grid: { left: 8, right: 56, top: 12, bottom: 8, containLabel: true },
+    tooltip: { ...baseChartOption().tooltip, formatter: (p) => `${p.name}：<b>${p.value}%</b>` },
+    xAxis: { type: 'value', min: 0, max: 100, ...valAxisStyle() },
+    yAxis: { type: 'category', inverse: true, data: data.map(d => d.name), ...catAxisStyle() },
+    series: [{
+      name: '及格率',
+      type: 'bar',
+      data: data.map(d => d.pass_rate),
+      barWidth: 22,
+      barCategoryGap: '25%',
+      itemStyle: { color: PALETTE[0], borderRadius: [0, 4, 4, 0] },
+      label: { show: true, position: 'right', color: INK.secondary, fontSize: 12, formatter: '{c}%' },
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        lineStyle: { color: INK.axis, width: 1 },
+        label: { show: true, position: 'insideEndTop', color: INK.muted, fontSize: 11, formatter: '及格线 60%' },
+        data: [{ xAxis: 60 }],
+      },
+    }],
+  });
+}
+
+function renderClassCourse(rows) {
+  const classes = [...new Set(rows.map(r => r.class_name))];
+  const courses = [...new Set(rows.map(r => r.course_name))];
+  const series = courses.map((cn, i) => ({
+    name: cn,
+    type: 'bar',
+    barGap: '20%',  // 相邻条之间留表面间隙
+    itemStyle: { color: PALETTE[i] || PALETTE[7], borderRadius: [4, 4, 0, 0] },
+    data: classes.map(cl => rows.find(r => r.class_name === cl && r.course_name === cn)?.v ?? null),
+  }));
+  initChart('class-course-chart').setOption({
+    ...baseChartOption(),
+    color: PALETTE,
+    legend: { top: 0, textStyle: { color: INK.secondary, fontSize: 12 } },
+    grid: { left: 8, right: 16, top: 40, bottom: 60, containLabel: true },
+    tooltip: { ...baseChartOption().tooltip, formatter: (p) => `${p.seriesName}<br>${p.name}：<b>${p.value}</b> 分` },
+    xAxis: { type: 'category', data: classes, ...catAxisStyle(),
+             axisLabel: { ...catAxisStyle().axisLabel, rotate: 30 } },
+    yAxis: { type: 'value', min: 0, max: 100, ...valAxisStyle() },
+    series,
+  });
+}
+
+function renderMajorAvg(data) {
+  initChart('major-avg-chart').setOption({
+    ...baseChartOption(),
+    grid: { left: 8, right: 56, top: 12, bottom: 8, containLabel: true },
+    tooltip: { ...baseChartOption().tooltip, formatter: (p) => `${p.name}：<b>${p.value}</b> 分` },
+    xAxis: { type: 'value', min: 0, max: 100, ...valAxisStyle() },
+    yAxis: { type: 'category', inverse: true, data: data.map(d => d.name), ...catAxisStyle() },
+    series: [{
+      name: '专业平均分',
+      type: 'bar',
+      data: data.map((d, i) => ({ value: d.avg_score, itemStyle: { color: majorColor(d.name), borderRadius: [0, 4, 4, 0] } })),
+      barWidth: 22,
+      barCategoryGap: '40%',
+      label: { show: true, position: 'right', color: INK.secondary, fontSize: 12, formatter: '{c}' },
+    }],
+  });
+}
+
+function renderScatter(data) {
+  const majors = Object.keys(MAJOR_COLORS);
+  const series = majors.map(m => ({
+    name: m,
+    type: 'scatter',
+    symbolSize: 12,
+    itemStyle: {
+      color: MAJOR_COLORS[m],
+      borderColor: INK.surface,  // 2px 表面环：重叠点时仍可区分
+      borderWidth: 2,
+    },
+    data: data.filter(d => d.major === m).map(d => ({
+      value: [d.x, d.y],
+      name: d.name,
+      class_name: d.class_name,
+      max_score: d.max_score,
+    })),
+  }));
+  initChart('scatter-chart').setOption({
+    ...baseChartOption(),
+    color: PALETTE,
+    legend: { top: 0, textStyle: { color: INK.secondary, fontSize: 12 } },
+    grid: { left: 8, right: 16, top: 40, bottom: 8, containLabel: true },
+    tooltip: {
+      ...baseChartOption().tooltip,
+      formatter: (p) => `${p.seriesName} · ${p.data.name}<br>课程门数：${p.value[0]}<br>平均分：<b>${p.value[1]}</b><br>班级：${p.data.class_name} · 最高分：${p.data.max_score}`,
+    },
+    xAxis: { type: 'value', name: '课程门数', minInterval: 1, ...valAxisStyle(),
+             nameTextStyle: { color: INK.muted } },
+    yAxis: { type: 'value', name: '平均分', min: 0, max: 100, ...valAxisStyle(),
+             nameTextStyle: { color: INK.muted } },
+    series,
+  });
+}
+
+function renderCourseTop(data) {
+  initChart('course-top-chart').setOption({
+    ...baseChartOption(),
+    grid: { left: 8, right: 110, top: 12, bottom: 8, containLabel: true },
+    tooltip: { ...baseChartOption().tooltip, formatter: (p) => `${p.name}<br>第一名：<b>${p.data.student_name}</b>（${p.data.class_name}）<br>分数：${p.value}` },
+    xAxis: { type: 'value', min: 0, max: 100, ...valAxisStyle() },
+    yAxis: { type: 'category', inverse: true, data: data.map(d => d.course_name), ...catAxisStyle() },
+    series: [{
+      name: '第一名分数',
+      type: 'bar',
+      data: data.map(d => ({ value: d.score, student_name: d.student_name, class_name: d.class_name })),
+      barWidth: 22,
+      barCategoryGap: '25%',
+      itemStyle: { color: PALETTE[0], borderRadius: [0, 4, 4, 0] },
+      label: { show: true, position: 'right', color: INK.secondary, fontSize: 12,
+               formatter: (p) => `${p.data.student_name} ${p.value}` },
+    }],
+  });
+}
+
+function renderFailTable(rows) {
+  const tbody = document.getElementById('fail-tbody');
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">暂无不及格记录 🎉</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.student_no)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.class_name)}</td>
+      <td>${escapeHtml(r.course_name)}</td>
+      <td>${r.score}</td>
+    </tr>`).join('');
+}
+
+function renderStudentTable(rows) {
+  const tbody = document.getElementById('student-tbody');
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.student_no)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.class_name)}</td>
+      <td>${escapeHtml(r.major)}</td>
+      <td>${r.course_count}</td>
+      <td>${r.avg_score ?? '—'}</td>
+      <td>${r.max_score ?? '—'}</td>
+      <td>${r.min_score ?? '—'}</td>
+      <td>${r.pass_count ?? '—'}</td>
+      <td>${r.fail_count ?? '—'}</td>
+    </tr>`).join('');
+}
+
+async function loadAll() {
+  try {
+    const [dist, courseAvg, passRate, classCourse, majorAvg, scatter, courseTop, failList, studentTable] =
+      await Promise.all([
+        fetchJSON('/api/stats/score_distribution'),
+        fetchJSON('/api/stats/course_avg'),
+        fetchJSON('/api/stats/course_pass_rate'),
+        fetchJSON('/api/stats/class_course_avg'),
+        fetchJSON('/api/stats/major_avg'),
+        fetchJSON('/api/stats/student_scatter'),
+        fetchJSON('/api/stats/course_top'),
+        fetchJSON('/api/stats/fail_list'),
+        fetchJSON('/api/stats/student_table'),
+      ]);
+    renderDist(dist);
+    renderCourseAvg(courseAvg);
+    renderPassRate(passRate);
+    renderClassCourse(classCourse);
+    renderMajorAvg(majorAvg);
+    renderScatter(scatter);
+    renderCourseTop(courseTop);
+    renderFailTable(failList);
+    renderStudentTable(studentTable);
+  } catch (err) {
+    toast('统计数据加载失败：' + err.message, 'error');
+  }
+}
+
+loadAll();
+window.addEventListener('resize', () => Object.values(charts).forEach(c => c.resize()));
+</script>
+{% endblock %}

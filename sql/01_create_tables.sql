@@ -1,6 +1,6 @@
 -- ============================================
 -- 学生成绩数据库 - 建表脚本
--- 数据库: MySQL 5.7+ / 8.0
+-- 数据库: MySQL 8.0+（CHECK 约束需 8.0.16+ 才强制执行，窗口函数需 8.0+）
 -- ============================================
 
 -- 创建数据库
@@ -15,9 +15,14 @@ DROP TABLE IF EXISTS grades;
 DROP TABLE IF EXISTS courses;
 DROP TABLE IF EXISTS teachers;
 DROP TABLE IF EXISTS students;
+DROP TABLE IF EXISTS users;
 
 -- ============================================
 -- 1. 学生表 (students)
+-- 注：建表必须显式写 COLLATE=utf8mb4_unicode_ci，与建库保持一致。
+--     只写 CHARSET=utf8mb4 时 MySQL 会改用字符集默认排序规则（8.0 为
+--     utf8mb4_0900_ai_ci），与库/存储过程参数的 unicode_ci 比较字符串
+--     会报 ERROR 1267（Illegal mix of collations）。
 -- ============================================
 CREATE TABLE students (
     student_id    INT           NOT NULL AUTO_INCREMENT  COMMENT '学生ID，主键',
@@ -29,8 +34,10 @@ CREATE TABLE students (
     class_name    VARCHAR(50)             DEFAULT NULL    COMMENT '班级',
     enrollment_date DATE                   DEFAULT NULL   COMMENT '入学日期',
     created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
-    PRIMARY KEY (student_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='学生信息表';
+    PRIMARY KEY (student_id),
+    KEY idx_major (major),      -- 按专业查询/分组（专业排名统计）
+    KEY idx_class (class_name)  -- 按班级查询/分组（班级对比统计）
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学生信息表';
 
 -- ============================================
 -- 2. 教师表 (teachers)
@@ -45,7 +52,7 @@ CREATE TABLE teachers (
     phone         VARCHAR(20)             DEFAULT NULL    COMMENT '联系电话',
     created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
     PRIMARY KEY (teacher_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='教师信息表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='教师信息表';
 
 -- ============================================
 -- 3. 课程表 (courses)
@@ -62,7 +69,7 @@ CREATE TABLE courses (
     FOREIGN KEY (teacher_id) REFERENCES teachers(teacher_id)
         ON DELETE SET NULL
         ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='课程信息表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='课程信息表';
 
 -- ============================================
 -- 4. 成绩表 (grades)
@@ -81,6 +88,21 @@ CREATE TABLE grades (
     FOREIGN KEY (course_id) REFERENCES courses(course_id)
         ON DELETE CASCADE
         ON UPDATE CASCADE,
-    UNIQUE KEY uk_student_course (student_id, course_id),
+    -- 同一学生同一课程同一考试日期唯一：允许重修/补考（按不同考试日期各留一条记录）
+    UNIQUE KEY uk_student_course_exam (student_id, course_id, exam_date),
+    KEY idx_exam_date (exam_date),  -- 按考试日期筛选（补考查询/学期成绩）
     CHECK (score >= 0 AND score <= 100)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='学生成绩表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学生成绩表';
+
+-- ============================================
+-- 5. 系统用户表 (users)
+-- ============================================
+CREATE TABLE users (
+    user_id       INT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '用户ID，主键',
+    username      VARCHAR(32)   NOT NULL                 COMMENT '登录名',
+    password_hash VARCHAR(255)  NOT NULL                 COMMENT 'PBKDF2-SHA256 密码哈希（格式: pbkdf2_sha256$迭代次数$盐hex$哈希hex）',
+    nickname      VARCHAR(32)             DEFAULT NULL   COMMENT '昵称',
+    created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
+    PRIMARY KEY (user_id),
+    UNIQUE KEY uk_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统用户表';

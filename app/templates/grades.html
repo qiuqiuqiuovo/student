@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block title %}成绩管理 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>成绩管理</h1>
+    <p class="sub">共 {{ total }} 条成绩 · 录入经两层校验：应用层 pydantic + 数据库触发器</p>
+  </div>
+</div>
+
+<div class="card">
+  <h2>录入单条成绩</h2>
+  <form class="form-row" id="grade-form">
+    <div class="form-field">
+      <label for="g-student">学生</label>
+      <select id="g-student" required>
+        <option value="">请选择</option>
+        {% for s in student_options %}
+        <option value="{{ s.student_id }}">{{ s.student_no }} {{ s.name }}（{{ s.class_name }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label for="g-course">课程</label>
+      <select id="g-course" required>
+        <option value="">请选择</option>
+        {% for c in course_options %}
+        <option value="{{ c.course_id }}">{{ c.course_no }} {{ c.course_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label for="g-score">分数（0-100）</label>
+      <input id="g-score" type="number" min="0" max="100" step="0.5" required>
+    </div>
+    <div class="form-field">
+      <label for="g-date">考试日期</label>
+      <input id="g-date" type="date" required>
+    </div>
+    <button type="submit" class="btn btn-primary">录入成绩</button>
+  </form>
+  <p class="batch-help">同一学生同一课程同一考试日期只能有一条记录（唯一键）；重修/补考请用新的考试日期录入。</p>
+</div>
+
+<div class="card">
+  <h2>批量导入</h2>
+  <textarea id="batch-area" class="batch-area"
+    placeholder="每行一条：学号,课程号,分数,考试日期&#10;例：20230101,CS103,81.5,2024-06-20&#10;20230102,MA202,90,2024-06-22"></textarea>
+  <p class="batch-help">
+    整个批次在一个事务中逐行调用存储过程 <code>sp_insert_grade</code>，
+    <b>任一行失败则全部回滚</b>（事务原子性，见 sql/05_transaction_demo.sql）。
+    已存在的"学生+课程+日期"组合会自动更新分数。
+  </p>
+  <div style="margin-top:10px">
+    <button type="button" class="btn btn-primary" onclick="batchImport()">导入（单事务）</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="page-head">
+    <h1 style="font-size:15px">成绩列表</h1>
+    <form method="get" action="/grades" class="form-row">
+      <div class="form-field">
+        <select name="student_id">
+          <option value="0">全部学生</option>
+          {% for s in student_options %}
+          <option value="{{ s.student_id }}" {{ 'selected' if student_id == s.student_id }}>{{ s.student_no }} {{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <select name="course_id">
+          <option value="0">全部课程</option>
+          {% for c in course_options %}
+          <option value="{{ c.course_id }}" {{ 'selected' if course_id == c.course_id }}>{{ c.course_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-ghost">筛选</button>
+      {% if student_id or course_id %}<a class="btn btn-ghost" href="/grades">清除</a>{% endif %}
+    </form>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>学号</th><th>姓名</th><th>班级</th>
+          <th>课程</th><th>分数</th><th>考试日期</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for g in items %}
+        <tr data-id="{{ g.grade_id }}"
+            data-score="{{ g.score }}"
+            data-date="{{ g.exam_date }}"
+            data-student-name="{{ g.student_name }}"
+            data-course-name="{{ g.course_name }}">
+          <td>{{ g.grade_id }}</td>
+          <td>{{ g.student_no }}</td>
+          <td>{{ g.student_name }}</td>
+          <td>{{ g.class_name }}</td>
+          <td>{{ g.course_name }}</td>
+          <td>
+            {{ g.score }}
+            {% if g.score < 60 %}<span class="muted">（不及格）</span>{% endif %}
+          </td>
+          <td>{{ g.exam_date }}</td>
+          <td>
+            <div class="row-actions">
+              <button type="button" class="link-btn" onclick="openGradeModal(this.closest('tr'))">编辑</button>
+              <button type="button" class="link-btn danger"
+                      onclick="deleteGrade(this.closest('tr'))">删除</button>
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="empty">暂无成绩数据</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}<a href="?student_id={{ student_id }}&course_id={{ course_id }}&page={{ page - 1 }}">上一页</a>{% endif %}
+    <span class="current">第 {{ page }} / {{ pages }} 页</span>
+    {% if page < pages %}<a href="?student_id={{ student_id }}&course_id={{ course_id }}&page={{ page + 1 }}">下一页</a>{% endif %}
+    <span class="info">共 {{ total }} 条</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="modal-mask" id="grade-modal" style="display:none"
+     onclick="if (event.target === this) closeModal('grade-modal')">
+  <div class="modal">
+    <h3 id="grade-modal-title">编辑成绩</h3>
+    <form id="grade-edit-form" onsubmit="submitGradeEdit(event)">
+      <input type="hidden" id="grade-id">
+      <div class="form-field">
+        <label for="eg-score">分数（0-100）</label>
+        <input id="eg-score" name="score" type="number" min="0" max="100" step="0.5" required>
+      </div>
+      <div class="form-field">
+        <label for="eg-date">考试日期</label>
+        <input id="eg-date" name="exam_date" type="date" required>
+      </div>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('grade-modal')">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function submitGrade(e) {
+  e.preventDefault();
+  const f = document.getElementById('grade-form');
+  const payload = {
+    student_id: parseInt(f.querySelector('#g-student').value, 10),
+    course_id: parseInt(f.querySelector('#g-course').value, 10),
+    score: parseFloat(f.querySelector('#g-score').value),
+    exam_date: f.querySelector('#g-date').value,
+  };
+  try {
+    await fetchJSON('/api/grades', { method: 'POST', body: JSON.stringify(payload) });
+    toast('成绩已录入');
+    location.reload();
+  } catch (err) {
+    // 触发器 / 唯一键冲突的中文报错会原样透传到这里
+    toast(err.message, 'error');
+  }
+}
+
+async function batchImport() {
+  const ta = document.getElementById('batch-area');
+  const rows = [];
+  const lines = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
+  try {
+    for (const line of lines) {
+      const parts = line.split(/[,，\t]+/).map(p => p.trim());
+      if (parts.length !== 4) {
+        throw new Error(`第 ${rows.length + 1} 行格式错误（应为：学号,课程号,分数,日期）`);
+      }
+      const score = parseFloat(parts[2]);
+      if (Number.isNaN(score) || score < 0 || score > 100) {
+        throw new Error(`第 ${rows.length + 1} 行分数必须在 0-100 之间`);
+      }
+      rows.push({ student_no: parts[0], course_no: parts[1], score, exam_date: parts[3] });
+    }
+    if (rows.length === 0) { toast('请先粘贴数据', 'error'); return; }
+  } catch (err) {
+    toast(err.message, 'error');
+    return;
+  }
+  try {
+    const result = await fetchJSON('/api/grades/batch', {
+      method: 'POST', body: JSON.stringify({ rows }),
+    });
+    toast(`成功导入 ${result.count} 条（事务已提交）`);
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function openGradeModal(tr) {
+  const f = document.getElementById('grade-edit-form');
+  document.getElementById('grade-modal-title').textContent =
+    `编辑成绩：${tr.dataset.studentName} · ${tr.dataset.courseName}`;
+  document.getElementById('grade-id').value = tr.dataset.id;
+  f.elements.score.value = tr.dataset.score;
+  f.elements.exam_date.value = tr.dataset.date;
+  openModal('grade-modal');
+}
+
+async function submitGradeEdit(e) {
+  e.preventDefault();
+  const f = document.getElementById('grade-edit-form');
+  const id = document.getElementById('grade-id').value;
+  const payload = {
+    score: parseFloat(f.elements.score.value),
+    exam_date: f.elements.exam_date.value,
+  };
+  try {
+    await fetchJSON(`/api/grades/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    toast('成绩已更新');
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteGrade(tr) {
+  if (!confirmDelete(`确定删除「${tr.dataset.studentName}」的「${tr.dataset.courseName}」成绩记录？`)) return;
+  try {
+    await fetchJSON(`/api/grades/${tr.dataset.id}`, { method: 'DELETE' });
+    toast('成绩已删除');
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+</script>
+{% endblock %}

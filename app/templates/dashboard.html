@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>仪表盘</h1>
+    <p class="sub">数据库实时统计（连接 MySQL score_db，SQL 见 <code>app/routers/stats.py</code>）</p>
+  </div>
+</div>
+
+{# ---------- KPI 卡片 ---------- #}
+{% set ov = overview %}
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.student_count }}</div>
+    <div class="kpi-label">学生人数</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.teacher_count }}</div>
+    <div class="kpi-label">教师人数</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.course_count }}</div>
+    <div class="kpi-label">开课门数</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.grade_count }}</div>
+    <div class="kpi-label">成绩记录</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.overall_avg }}</div>
+    <div class="kpi-label">全库平均分</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">{{ ov.overall_pass_rate }}%</div>
+    <div class="kpi-label">总体及格率</div>
+    {% if ov.overall_pass_rate >= 80 %}
+    <span class="kpi-status good"><span class="dot good"></span>整体良好</span>
+    {% else %}
+    <span class="kpi-status bad"><span class="dot bad"></span>整体偏低</span>
+    {% endif %}
+  </div>
+  {% for row in gender_dist %}
+  <div class="kpi">
+    <div class="kpi-value">{{ row.value }}</div>
+    <div class="kpi-label">{{ row.name }}生人数</div>
+  </div>
+  {% endfor %}
+</div>
+
+{# ---------- 成绩分段分布图 ---------- #}
+<div class="card chart-card">
+  <h2>成绩分段分布（全部成绩）</h2>
+  <div id="dist-chart" class="chart-box"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/echarts.min.js"></script>
+<script>
+const distData = {{ score_distribution | tojson }};
+
+const distChart = echarts.init(document.getElementById('dist-chart'));
+// 有序类别（分数段）→ 序贯蓝 ramp（common.js 的 SEQ_BLUE）：分数越高颜色越深
+const distColors = [...SEQ_BLUE].reverse();
+distChart.setOption({
+  ...baseChartOption(),
+  grid: { left: 8, right: 56, top: 12, bottom: 8, containLabel: true },
+  tooltip: {
+    ...baseChartOption().tooltip,
+    formatter: (p) => `${p.name}：<b>${p.value}</b> 人次`,
+  },
+  xAxis: { type: 'value', ...valAxisStyle(), minInterval: 1 },
+  yAxis: {
+    type: 'category',
+    inverse: true,  // 高分段显示在上方
+    data: distData.map(d => d.seg),
+    ...catAxisStyle(),
+  },
+  series: [{
+    type: 'bar',
+    data: distData.map((d, i) => ({
+      value: d.cnt,
+      itemStyle: { color: distColors[i], borderRadius: [0, 4, 4, 0] },  // 圆角朝向数据末端
+    })),
+    barWidth: 22,
+    barCategoryGap: '25%',  // 相邻条之间留出表面间隙
+    label: {
+      show: true,
+      position: 'right',
+      color: INK.secondary,  // 标注文字用墨色 token，不用系列色
+      fontSize: 12,
+      formatter: '{c}',
+    },
+  }],
+});
+window.addEventListener('resize', () => distChart.resize());
+</script>
+{% endblock %}

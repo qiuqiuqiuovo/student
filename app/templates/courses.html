@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}课程管理 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>课程管理</h1>
+    <p class="sub">共 {{ total }} 门课程 · 删除课程会级联删除其全部成绩（外键 ON DELETE CASCADE）</p>
+  </div>
+  <div class="form-row">
+    <form method="get" action="/courses" class="form-row">
+      <input type="text" name="search" value="{{ search }}" placeholder="搜索课程编号 / 名称 / 教师">
+      <button type="submit" class="btn btn-ghost">搜索</button>
+      {% if search %}<a class="btn btn-ghost" href="/courses">清除</a>{% endif %}
+    </form>
+    <button type="button" class="btn btn-primary" onclick="openCourseModal()">＋ 新增课程</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>课程编号</th><th>课程名称</th><th>学分</th>
+          <th>授课教师</th><th>开课学期</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for c in items %}
+        <tr data-id="{{ c.course_id }}"
+            data-course-no="{{ c.course_no }}"
+            data-course-name="{{ c.course_name }}"
+            data-credits="{{ c.credits }}"
+            data-teacher-id="{{ c.teacher_id or '' }}"
+            data-semester="{{ c.semester or '' }}">
+          <td>{{ c.course_id }}</td>
+          <td>{{ c.course_no }}</td>
+          <td>{{ c.course_name }}</td>
+          <td>{{ c.credits }}</td>
+          <td>{% if c.teacher_name %}{{ c.teacher_name }}{% else %}<span class="muted">未分配</span>{% endif %}</td>
+          <td>{{ c.semester or '—' }}</td>
+          <td>
+            <div class="row-actions">
+              <button type="button" class="link-btn" onclick="openCourseModal(this.closest('tr'))">编辑</button>
+              <button type="button" class="link-btn danger"
+                      onclick="deleteCourse(this.closest('tr'))">删除</button>
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="empty">暂无课程数据</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}<a href="?search={{ search | urlencode }}&page={{ page - 1 }}">上一页</a>{% endif %}
+    <span class="current">第 {{ page }} / {{ pages }} 页</span>
+    {% if page < pages %}<a href="?search={{ search | urlencode }}&page={{ page + 1 }}">下一页</a>{% endif %}
+    <span class="info">共 {{ total }} 条</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="modal-mask" id="course-modal" style="display:none"
+     onclick="if (event.target === this) closeModal('course-modal')">
+  <div class="modal">
+    <h3 id="course-modal-title">新增课程</h3>
+    <form id="course-form" onsubmit="submitCourse(event)">
+      <input type="hidden" id="course-id">
+      <div class="form-field">
+        <label for="course-no">课程编号 *</label>
+        <input id="course-no" name="course_no" required maxlength="20">
+      </div>
+      <div class="form-field">
+        <label for="course-name">课程名称 *</label>
+        <input id="course-name" name="course_name" required maxlength="100">
+      </div>
+      <div class="form-field">
+        <label for="course-credits">学分（0.5 - 99.9）</label>
+        <input id="course-credits" name="credits" type="number" min="0.5" max="99.9" step="0.5" value="2.0">
+      </div>
+      <div class="form-field">
+        <label for="course-teacher">授课教师</label>
+        <select id="course-teacher" name="teacher_id">
+          <option value="">未分配</option>
+          {% for t in teacher_options %}
+          <option value="{{ t.teacher_id }}">{{ t.teacher_no }} {{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="course-semester">开课学期</label>
+        <input id="course-semester" name="semester" maxlength="20" placeholder="如：2023-2024-1">
+      </div>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('course-modal')">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openCourseModal(tr) {
+  const f = document.getElementById('course-form');
+  if (tr) {
+    document.getElementById('course-modal-title').textContent = '编辑课程';
+    document.getElementById('course-id').value = tr.dataset.id;
+    f.elements.course_no.value = tr.dataset.courseNo;
+    f.elements.course_name.value = tr.dataset.courseName;
+    f.elements.credits.value = tr.dataset.credits;
+    f.elements.teacher_id.value = tr.dataset.teacherId;
+    f.elements.semester.value = tr.dataset.semester;
+  } else {
+    document.getElementById('course-modal-title').textContent = '新增课程';
+    document.getElementById('course-id').value = '';
+    f.reset();
+  }
+  openModal('course-modal');
+}
+
+async function submitCourse(e) {
+  e.preventDefault();
+  const f = document.getElementById('course-form');
+  const id = document.getElementById('course-id').value;
+  const payload = {
+    course_no: f.elements.course_no.value.trim(),
+    course_name: f.elements.course_name.value.trim(),
+    credits: parseFloat(f.elements.credits.value),
+    teacher_id: f.elements.teacher_id.value ? parseInt(f.elements.teacher_id.value, 10) : null,
+    semester: f.elements.semester.value.trim() || null,
+  };
+  try {
+    if (id) {
+      await fetchJSON(`/api/courses/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      toast('课程信息已更新');
+    } else {
+      await fetchJSON('/api/courses', { method: 'POST', body: JSON.stringify(payload) });
+      toast('课程已新增');
+    }
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteCourse(tr) {
+  if (!confirmDelete(`确定删除课程「${tr.dataset.courseName}」？\n其全部成绩记录将级联删除，且不可恢复。`)) return;
+  try {
+    await fetchJSON(`/api/courses/${tr.dataset.id}`, { method: 'DELETE' });
+    toast('课程已删除');
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+</script>
+{% endblock %}

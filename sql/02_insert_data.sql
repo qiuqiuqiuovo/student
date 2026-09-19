@@ -154,6 +154,16 @@ INSERT INTO grades (student_id, course_id, score, exam_date) VALUES
 (20, 4, 94.0, '2024-01-08'),
 (20, 6, 89.0, '2024-01-15');
 
+-- ============================================
+-- 5. 系统用户（demo 账号：admin / admin123）
+--    哈希由 app/security.py 的 hash_password('admin123') 生成（PBKDF2-SHA256，60 万次迭代）
+--    行别名语法 AS new（8.0.19+），避免已弃用的 VALUES()；ON DUPLICATE KEY UPDATE 保证重跑幂等
+--    注意：users 表不在上方 TRUNCATE 列表内，重跑本脚本不会丢失已注册账号
+-- ============================================
+INSERT INTO users (username, password_hash, nickname)
+VALUES ('admin', 'pbkdf2_sha256$600000$7f1bc8868e656b9ab434ed8d6a09dceb$48c1e4a9e035cfd660d6898b3bee975867eca71c326a2d1e5f17a66d7ddd0cb8', '管理员') AS new
+ON DUPLICATE KEY UPDATE password_hash = new.password_hash;
+
 -- 验证数据
 SELECT '教师数据' AS 表名, COUNT(*) AS 记录数 FROM teachers
 UNION ALL

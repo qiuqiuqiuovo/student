@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}教师管理 - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>教师管理</h1>
+    <p class="sub">共 {{ total }} 名教师 · 删除教师后其授课课程自动变为"未分配"（外键 ON DELETE SET NULL）</p>
+  </div>
+  <div class="form-row">
+    <form method="get" action="/teachers" class="form-row">
+      <input type="text" name="search" value="{{ search }}" placeholder="搜索工号 / 姓名 / 职称 / 院系 / 电话">
+      <button type="submit" class="btn btn-ghost">搜索</button>
+      {% if search %}<a class="btn btn-ghost" href="/teachers">清除</a>{% endif %}
+    </form>
+    <button type="button" class="btn btn-primary" onclick="openTeacherModal()">＋ 新增教师</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>工号</th><th>姓名</th><th>性别</th>
+          <th>职称</th><th>院系</th><th>电话</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in items %}
+        <tr data-id="{{ t.teacher_id }}"
+            data-teacher-no="{{ t.teacher_no }}"
+            data-name="{{ t.name }}"
+            data-gender="{{ t.gender }}"
+            data-title="{{ t.title or '' }}"
+            data-department="{{ t.department or '' }}"
+            data-phone="{{ t.phone or '' }}">
+          <td>{{ t.teacher_id }}</td>
+          <td>{{ t.teacher_no }}</td>
+          <td>{{ t.name }}</td>
+          <td>{{ t.gender }}</td>
+          <td>{{ t.title or '—' }}</td>
+          <td>{{ t.department or '—' }}</td>
+          <td>{{ t.phone or '—' }}</td>
+          <td>
+            <div class="row-actions">
+              <button type="button" class="link-btn" onclick="openTeacherModal(this.closest('tr'))">编辑</button>
+              <button type="button" class="link-btn danger"
+                      onclick="deleteTeacher(this.closest('tr'))">删除</button>
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="empty">暂无教师数据</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}<a href="?search={{ search | urlencode }}&page={{ page - 1 }}">上一页</a>{% endif %}
+    <span class="current">第 {{ page }} / {{ pages }} 页</span>
+    {% if page < pages %}<a href="?search={{ search | urlencode }}&page={{ page + 1 }}">下一页</a>{% endif %}
+    <span class="info">共 {{ total }} 条</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="modal-mask" id="teacher-modal" style="display:none"
+     onclick="if (event.target === this) closeModal('teacher-modal')">
+  <div class="modal">
+    <h3 id="teacher-modal-title">新增教师</h3>
+    <form id="teacher-form" onsubmit="submitTeacher(event)">
+      <input type="hidden" id="teacher-id">
+      <div class="form-field">
+        <label for="teacher-no">工号 *</label>
+        <input id="teacher-no" name="teacher_no" required maxlength="20">
+      </div>
+      <div class="form-field">
+        <label for="teacher-name">姓名 *</label>
+        <input id="teacher-name" name="name" required maxlength="50">
+      </div>
+      <div class="form-field">
+        <label for="teacher-gender">性别</label>
+        <select id="teacher-gender" name="gender">
+          <option value="男">男</option>
+          <option value="女">女</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="teacher-title">职称</label>
+        <input id="teacher-title" name="title" maxlength="30" placeholder="如：教授 / 副教授 / 讲师">
+      </div>
+      <div class="form-field">
+        <label for="teacher-department">院系</label>
+        <input id="teacher-department" name="department" maxlength="50">
+      </div>
+      <div class="form-field">
+        <label for="teacher-phone">联系电话</label>
+        <input id="teacher-phone" name="phone" maxlength="20">
+      </div>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('teacher-modal')">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openTeacherModal(tr) {
+  const f = document.getElementById('teacher-form');
+  if (tr) {
+    document.getElementById('teacher-modal-title').textContent = '编辑教师';
+    document.getElementById('teacher-id').value = tr.dataset.id;
+    f.elements.teacher_no.value = tr.dataset.teacherNo;
+    f.elements.name.value = tr.dataset.name;
+    f.elements.gender.value = tr.dataset.gender;
+    f.elements.title.value = tr.dataset.title;
+    f.elements.department.value = tr.dataset.department;
+    f.elements.phone.value = tr.dataset.phone;
+  } else {
+    document.getElementById('teacher-modal-title').textContent = '新增教师';
+    document.getElementById('teacher-id').value = '';
+    f.reset();
+  }
+  openModal('teacher-modal');
+}
+
+async function submitTeacher(e) {
+  e.preventDefault();
+  const f = document.getElementById('teacher-form');
+  const id = document.getElementById('teacher-id').value;
+  const payload = {
+    teacher_no: f.elements.teacher_no.value.trim(),
+    name: f.elements.name.value.trim(),
+    gender: f.elements.gender.value,
+    title: f.elements.title.value.trim() || null,
+    department: f.elements.department.value.trim() || null,
+    phone: f.elements.phone.value.trim() || null,
+  };
+  try {
+    if (id) {
+      await fetchJSON(`/api/teachers/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      toast('教师信息已更新');
+    } else {
+      await fetchJSON('/api/teachers', { method: 'POST', body: JSON.stringify(payload) });
+      toast('教师已新增');
+    }
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteTeacher(tr) {
+  if (!confirmDelete(`确定删除教师「${tr.dataset.name}」？\n其授课课程将变为"未分配"（授课教师置空），课程本身保留。`)) return;
+  try {
+    await fetchJSON(`/api/teachers/${tr.dataset.id}`, { method: 'DELETE' });
+    toast('教师已删除');
+    location.reload();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+</script>
+{% endblock %}
